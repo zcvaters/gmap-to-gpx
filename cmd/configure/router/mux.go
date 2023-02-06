@@ -1,10 +1,10 @@
-package mux
+package router
 
 import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/httprate"
 	"github.com/joomcode/errorx"
-	"github.com/zcvaters/gmap-to-gpx/api/configure"
 	"github.com/zcvaters/gmap-to-gpx/api/handlers"
 	"github.com/zcvaters/gmap-to-gpx/cmd/configure/logging"
 	. "github.com/zcvaters/gmap-to-gpx/cmd/configure/logging"
@@ -12,6 +12,7 @@ import (
 	"golang.org/x/exp/slog"
 	"net/http"
 	"os"
+	"time"
 )
 
 type Handler func(w http.ResponseWriter, r *http.Request) error
@@ -26,8 +27,8 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
 		}
 
-		if err := data.WriteJSONBytes(configure.ResponseData{
-			Data:  make([]any, 0),
+		if err := data.WriteJSONBytes(data.ResponseData{
+			Data:  nil,
 			Error: errX.Message(),
 		}, w); err != nil {
 			Log.Error(errorx.Decorate(err, "failed to write JSON response: %v"))
@@ -35,11 +36,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-type Mux struct {
-	Router *chi.Mux
-}
-
-func (m *Mux) InitializeRouter() {
+func (s *Server) MountHandlers() {
 	slogJSONHandler := slog.HandlerOptions{
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
 			if a.Key == slog.TimeKey {
@@ -48,8 +45,25 @@ func (m *Mux) InitializeRouter() {
 			return a
 		},
 	}.NewJSONHandler(os.Stdout)
-	m.Router.Use(middleware.RequestID)
-	m.Router.Use(logging.NewStructuredLogger(slogJSONHandler))
-	m.Router.Use(middleware.Recoverer)
-	m.Router.Method("POST", "/gMapToGPX", Handler(handlers.ConvertGMAPToGPX))
+	s.Router.Use(middleware.RequestID)
+	s.Router.Use(logging.NewStructuredLogger(slogJSONHandler))
+	s.Router.Use(middleware.AllowContentType("application/json"))
+	s.Router.Use(middleware.Heartbeat("/"))
+	s.Router.Use(middleware.RealIP)
+	s.Router.Use(httprate.LimitByIP(10, 1*time.Minute))
+	s.Router.Use(middleware.Recoverer)
+
+	s.Router.Route("/api/v1", func(r chi.Router) {
+		r.Method("POST", "/gMapToGPX", Handler(handlers.ConvertGMAPToGPX))
+	})
+}
+
+type Server struct {
+	Router *chi.Mux
+}
+
+func CreateNewServer() *Server {
+	s := &Server{}
+	s.Router = chi.NewRouter()
+	return s
 }

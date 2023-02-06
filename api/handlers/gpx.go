@@ -5,9 +5,10 @@ import (
 	"encoding/xml"
 	"fmt"
 	"github.com/joomcode/errorx"
-	"github.com/zcvaters/gmap-to-gpx/api/configure"
+	"github.com/zcvaters/gmap-to-gpx/cmd/configure/environment"
 	. "github.com/zcvaters/gmap-to-gpx/cmd/configure/logging"
 	"github.com/zcvaters/gmap-to-gpx/cmd/data"
+	"googlemaps.github.io/maps"
 	"io"
 	"net/http"
 	"net/url"
@@ -16,8 +17,6 @@ import (
 )
 
 const GMapURL string = "https://www.gmap-pedometer.com"
-
-//const OpenElevationAPI string = "https://api.open-elevation.com/api/v1/lookup"
 
 type GMapToGPXRequest struct {
 	RouteID int `json:"routeID"`
@@ -78,32 +77,23 @@ type OpenElevationResponse struct {
 func ConvertGMAPToGPX(w http.ResponseWriter, r *http.Request) error {
 	w.Header().Set("Content-Type", "application/json")
 
-	reqBody, err := io.ReadAll(r.Body)
-	if err != nil {
-		return errorx.InternalError.New("failed to read the request body: %s", err)
-	}
-
-	if len(reqBody) == 0 {
-		return errorx.AssertionFailed.New("request missing body")
-	}
-
-	var routeContext GMapToGPXRequest
-	err = json.Unmarshal(reqBody, &routeContext)
-	if err != nil {
-		return errorx.IllegalArgument.New("failed to unmarshal request body %s", err)
+	var routeContext *GMapToGPXRequest
+	err := json.NewDecoder(r.Body).Decode(&routeContext)
+	if err == io.EOF {
+		return errorx.AssertionFailed.New("request contains no body contents")
+	} else if err != nil || routeContext == nil {
+		return errorx.AssertionFailed.New("request json malformed")
 	}
 
 	if routeContext.RouteID == 0 {
-		return errorx.AssertionFailed.New("no routeID present: %d", routeContext.RouteID)
+		return errorx.AssertionFailed.New("invalid route id. Cannot be: %d", routeContext.RouteID)
 	}
 
-	var gMapURL string
+	gMapURL := GMapURL + "/gp/ajaxRoute/get"
 	if routeContext.RouteID < 5000000 {
 		// TODO: Determine why/if route id's this low still exist.
 		//gMapURL = GMapURL + "/getRoute.php"
 		return errorx.AssertionFailed.New("invalid route ID, must be greater than 5000000.")
-	} else {
-		gMapURL = GMapURL + "/gp/ajaxRoute/get"
 	}
 
 	reqData := url.Values{"rId": {fmt.Sprint(routeContext.RouteID)}}.Encode()
@@ -154,6 +144,8 @@ func ConvertGMAPToGPX(w http.ResponseWriter, r *http.Request) error {
 
 	if mapDataResp.Name != "" {
 		resultGPX.Track.Name = mapDataResp.Name
+	} else {
+		resultGPX.Track.Name = "gMapToGPX"
 	}
 
 	type trackPoint struct {
@@ -174,64 +166,31 @@ func ConvertGMAPToGPX(w http.ResponseWriter, r *http.Request) error {
 		})
 	}
 
-	//allPoints := new(OpenElevationRequest)
-	//type openElev struct {
-	//	Latitude  float64 `json:"latitude"`
-	//	Longitude float64 `json:"longitude"`
-	//}
-	//for _, trackP := range resultGPX.Track.TrackSegment.TrackPoint {
-	//	allPoints.Locations = append(allPoints.Locations, openElev{
-	//		Latitude:  trackP.Latitude,
-	//		Longitude: trackP.Longitude,
-	//	})
-	//}
-	//
-	//marshal, err := json.Marshal(allPoints)
-	//if err != nil {
-	//	return errorx.InternalError.New("failed to marshal json: %s", err)
-	//}
-	//
-	//eleReq, err := http.NewRequest("POST", fmt.Sprintf(environment.Variables.OpenElevationAPIURL+"/api/v1/lookup"), bytes.NewBuffer(marshal))
-	//if err != nil {
-	//	return errorx.InternalError.New("failed to create request: %s", err)
-	//}
-	//eleReq.Header.Set("Content-Type", "application/json")
-	//eleResp, err := client.Do(eleReq)
-	//if err != nil {
-	//	return errorx.InternalError.New("failed to make request to elevation api: %s", err)
-	//}
-	//if eleResp.StatusCode != http.StatusOK {
-	//	return errorx.InternalError.New("elevation api status %s", eleResp.Status)
-	//}
-	//
-	//defer func(Body io.ReadCloser) {
-	//	err := Body.Close()
-	//	if err != nil {
-	//		Log.Errorf("failed to close eleResBody, %v", err)
-	//	}
-	//}(eleResp.Body)
-	//
-	//eleResBody, err := io.ReadAll(eleResp.Body)
-	//if err != nil {
-	//	return errorx.InternalError.New("failed to read the response elevation api response body: %s", err)
-	//}
-	//
-	//var openElevationResp OpenElevationResponse
-	//err = json.Unmarshal(eleResBody, &openElevationResp)
-	//if err != nil {
-	//	return errorx.InternalError.New("failed to unmarshal response from elevation api: %s", err)
-	//}
-	//
-	//for i, elevationResp := range openElevationResp.Results {
-	//	if elevationResp.Elevation != 0 {
-	//		resultGPX.Track.TrackSegment.TrackPoint[i].Elevation = elevationResp.Elevation
-	//	}
-	//}
+	gClient, err := maps.NewClient(maps.WithAPIKey(environment.Variables.ElevationAPIKey))
+	if err != nil {
+		return errorx.InternalError.New("failed to configure maps api client: %s", err)
+	}
 
-	//out, err := xml.MarshalIndent(resultGPX, " ", "  ")
-	//if err != nil {
-	//	return err
-	//}
+	eleReq := &maps.ElevationRequest{
+		Locations: nil,
+	}
+
+	for _, trackP := range resultGPX.Track.TrackSegment.TrackPoint {
+		eleReq.Locations = append(eleReq.Locations, maps.LatLng{
+			Lat: trackP.Latitude,
+			Lng: trackP.Longitude,
+		})
+	}
+	elevations, err := gClient.Elevation(r.Context(), eleReq)
+	if err != nil {
+		return errorx.InternalError.New("failed to fetch elevation data: %s", err)
+	}
+
+	for i, elevationResp := range elevations {
+		if elevationResp.Elevation != 0 {
+			resultGPX.Track.TrackSegment.TrackPoint[i].Elevation = elevationResp.Elevation
+		}
+	}
 
 	gpxRes, err := xml.Marshal(resultGPX)
 	if err != nil {
@@ -240,8 +199,8 @@ func ConvertGMAPToGPX(w http.ResponseWriter, r *http.Request) error {
 
 	Log.Debug(string(gpxRes))
 
-	if err := data.WriteJSONBytes(configure.ResponseData{
-		Data:  gpxRes,
+	if err := data.WriteJSONBytes(data.ResponseData{
+		Data:  nil,
 		Error: "",
 	}, w); err != nil {
 		return errorx.InternalError.New("failed to write json response: %s", err)
