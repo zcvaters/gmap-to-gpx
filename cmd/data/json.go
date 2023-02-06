@@ -5,6 +5,11 @@ import (
 	"net/http"
 )
 
+type ResponseData struct {
+	Data  *string `json:"data"`
+	Error string  `json:"error"`
+}
+
 func MarshalJSON(v any) (*[]byte, error) {
 	r, err := json.Marshal(v)
 	if err != nil {

@@ -17,8 +17,6 @@ import (
 
 var Log *zap.SugaredLogger
 
-//type Log func()
-
 func Initialize(productionLogger bool) {
 	zapLog, err := zap.NewProduction()
 	if err != nil {
