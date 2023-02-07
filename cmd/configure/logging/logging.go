@@ -17,7 +17,7 @@ import (
 
 var Log *zap.SugaredLogger
 
-func Initialize(productionLogger bool) {
+func CreateNewLogger(productionLogger bool) *zap.SugaredLogger {
 	zapLog, err := zap.NewProduction()
 	if err != nil {
 		log.Fatalf("failed to configure logger %v", err)
@@ -43,11 +43,11 @@ func Initialize(productionLogger bool) {
 	defer func(zapLog *zap.Logger) {
 		err := zapLog.Sync()
 		if err != nil && !errors.Is(err, syscall.ENOTTY) {
-			Log.Debugf("failed to sync zap log: %v", err)
+			log.Printf("failed to sync zap log: %s\n", err)
 		}
 	}(zapLog)
 
-	Log = zapLog.Sugar()
+	return zapLog.Sugar()
 }
 
 type DiscordWebhook struct {

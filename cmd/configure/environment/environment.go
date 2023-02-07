@@ -13,13 +13,8 @@ type Environment struct {
 	Production      bool
 }
 
-var Variables Environment
-
-func Initialize() {
-	Variables.SetVariables()
-}
-
-func (e *Environment) SetVariables() {
+func CreateNewEnv() *Environment {
+	e := &Environment{}
 	isProd := false
 	prodVal, ok := os.LookupEnv("PRODUCTION")
 	if !ok || prodVal == "" {
@@ -32,7 +27,7 @@ func (e *Environment) SetVariables() {
 		}
 		e.Production = isProd
 	}
-	logging.Initialize(Variables.Production)
+	logging.Log = logging.CreateNewLogger(e.Production)
 
 	if elevationApiKey, ok := os.LookupEnv("ELEVATION_API_KEY"); !ok || elevationApiKey == "" {
 		logging.Log.Fatalf("elevation api key not set in enviroinment, have \"%s\"", elevationApiKey)
@@ -46,4 +41,5 @@ func (e *Environment) SetVariables() {
 		e.Address = address
 	}
 
+	return e
 }

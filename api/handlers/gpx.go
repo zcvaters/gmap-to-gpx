@@ -5,8 +5,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"github.com/joomcode/errorx"
-	"github.com/zcvaters/gmap-to-gpx/cmd/configure/environment"
-	. "github.com/zcvaters/gmap-to-gpx/cmd/configure/logging"
+	"github.com/zcvaters/gmap-to-gpx/cmd/configure/logging"
 	"github.com/zcvaters/gmap-to-gpx/cmd/data"
 	"googlemaps.github.io/maps"
 	"io"
@@ -54,7 +53,7 @@ type ResultingGPX struct {
 	} `xml:"trk"`
 }
 
-func ConvertGMAPToGPX(w http.ResponseWriter, r *http.Request) error {
+func (h *Handlers) ConvertGMAPToGPX(w http.ResponseWriter, r *http.Request) error {
 	w.Header().Set("Content-Type", "application/json")
 
 	var routeContext *GMapToGPXRequest
@@ -91,7 +90,7 @@ func ConvertGMAPToGPX(w http.ResponseWriter, r *http.Request) error {
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
 		if err != nil {
-			Log.Errorf("failed to close response body, %v", err)
+			logging.Log.Errorf("failed to close response body, %v", err)
 		}
 	}(resp.Body)
 
@@ -146,7 +145,7 @@ func ConvertGMAPToGPX(w http.ResponseWriter, r *http.Request) error {
 		})
 	}
 
-	gClient, err := maps.NewClient(maps.WithAPIKey(environment.Variables.ElevationAPIKey))
+	gClient, err := maps.NewClient(maps.WithAPIKey(h.Env.ElevationAPIKey))
 	if err != nil {
 		return errorx.InternalError.New("failed to configure maps api client: %s", err)
 	}
@@ -178,7 +177,7 @@ func ConvertGMAPToGPX(w http.ResponseWriter, r *http.Request) error {
 		return errorx.InternalError.New("failed to marshal xml: %s", err)
 	}
 
-	Log.Debug(string(gpxRes))
+	logging.Log.Debug(string(gpxRes))
 
 	if err := data.WriteJSONBytes(data.ResponseData{
 		Data:  "",
