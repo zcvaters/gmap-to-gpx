@@ -22,10 +22,6 @@ type GMapToGPXRequest struct {
 	RouteID int `json:"routeID"`
 }
 
-type GMapToGPXResponse struct {
-	PreSignedURL string `json:"url,omitempty"`
-}
-
 type MapDataResp struct {
 	CenterX         string `json:"centerX"`
 	CenterY         string `json:"centerY"`
@@ -56,22 +52,6 @@ type ResultingGPX struct {
 			} `xml:"trkpt"`
 		} `xml:"trkseg"`
 	} `xml:"trk"`
-}
-
-type OpenElevationRequest struct {
-	Locations []struct {
-		Latitude  float64 `json:"latitude"`
-		Longitude float64 `json:"longitude"`
-	} `json:"locations"`
-}
-
-type OpenElevationResponse struct {
-	Results []struct {
-		Latitude  float64 `json:"latitude"`
-		Longitude float64 `json:"longitude"`
-		Elevation float64 `json:"elevation"`
-		Errors    string  `json:"error,omitempty"`
-	} `json:"results"`
 }
 
 func ConvertGMAPToGPX(w http.ResponseWriter, r *http.Request) error {
@@ -181,6 +161,7 @@ func ConvertGMAPToGPX(w http.ResponseWriter, r *http.Request) error {
 			Lng: trackP.Longitude,
 		})
 	}
+
 	elevations, err := gClient.Elevation(r.Context(), eleReq)
 	if err != nil {
 		return errorx.InternalError.New("failed to fetch elevation data: %s", err)
@@ -200,7 +181,7 @@ func ConvertGMAPToGPX(w http.ResponseWriter, r *http.Request) error {
 	Log.Debug(string(gpxRes))
 
 	if err := data.WriteJSONBytes(data.ResponseData{
-		Data:  nil,
+		Data:  "",
 		Error: "",
 	}, w); err != nil {
 		return errorx.InternalError.New("failed to write json response: %s", err)

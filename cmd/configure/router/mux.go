@@ -28,7 +28,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err := data.WriteJSONBytes(data.ResponseData{
-			Data:  nil,
+			Data:  "",
 			Error: errX.Message(),
 		}, w); err != nil {
 			Log.Error(errorx.Decorate(err, "failed to write JSON response: %v"))

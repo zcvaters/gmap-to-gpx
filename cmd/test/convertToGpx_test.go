@@ -24,9 +24,9 @@ func TestConvertGMAPToGPX(t *testing.T) {
 	s := router.CreateNewServer()
 	s.MountHandlers()
 	tt := []test{
-		{input: nil, status: http.StatusBadRequest, body: &data.ResponseData{Data: nil, Error: "request json malformed"}},
-		{input: `{"test": 123}`, status: http.StatusBadRequest, body: &data.ResponseData{Data: nil, Error: "request json malformed"}},
-		{input: &handlers.GMapToGPXRequest{RouteID: 4999999}, status: http.StatusBadRequest, body: &data.ResponseData{Data: nil, Error: "invalid route ID, must be greater than 5000000."}},
+		{input: nil, status: http.StatusBadRequest, body: &data.ResponseData{Data: "", Error: "request json malformed"}},
+		{input: `{"test": 123}`, status: http.StatusBadRequest, body: &data.ResponseData{Data: "", Error: "request json malformed"}},
+		{input: &handlers.GMapToGPXRequest{RouteID: 4999999}, status: http.StatusBadRequest, body: &data.ResponseData{Data: "", Error: "invalid route ID, must be greater than 5000000."}},
 		{input: &handlers.GMapToGPXRequest{RouteID: 5000001}, status: http.StatusOK},
 		{input: &handlers.GMapToGPXRequest{RouteID: 7696696}, status: http.StatusOK},
 	}
