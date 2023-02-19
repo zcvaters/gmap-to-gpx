@@ -11,11 +11,10 @@ import (
 	"golang.org/x/exp/slog"
 	"log"
 	"net/http"
+	"os"
 	"syscall"
 	"time"
 )
-
-var Log *zap.SugaredLogger
 
 func CreateNewLogger(productionLogger bool) *zap.SugaredLogger {
 	zapLog, err := zap.NewProduction()
@@ -120,7 +119,7 @@ func SendWebhookMsg(entry zapcore.Entry) {
 	}
 
 	embedJson, _ := json.Marshal(reqBody)
-	url := "https://canary.discord.com/api/webhooks/1069997044594384936/CqDH8Pmfsc81tvP7Xbv9kFKY6iTEEe5jNwJYnG6E84v6KDu6O_fke4dMduEWyNFUxAiv"
+	url := os.Getenv("DISCORD_WEBHOOK")
 	req, _ := http.NewRequest("POST", url, bytes.NewReader(embedJson))
 	req.Header.Add("Content-Type", "application/json")
 

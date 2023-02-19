@@ -3,35 +3,21 @@ package router
 import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/cors"
 	"github.com/go-chi/httprate"
-	"github.com/joomcode/errorx"
-	"github.com/zcvaters/gmap-to-gpx/api/handlers"
+	"github.com/zcvaters/gmap-to-gpx/cmd/api/handlers"
 	"github.com/zcvaters/gmap-to-gpx/cmd/configure/logging"
-	"github.com/zcvaters/gmap-to-gpx/cmd/data"
 	"golang.org/x/exp/slog"
 	"net/http"
 	"os"
 	"time"
 )
 
-type Handler func(w http.ResponseWriter, r *http.Request) error
+type Handler func(w http.ResponseWriter, r *http.Request) http.Handler
 
 func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if err := h(w, r); err != nil {
-		errX := errorx.Cast(err)
-		logging.Log.Error(errorx.Decorate(errX, "handler error"))
-		if errX.IsOfType(errorx.AssertionFailed) || errX.IsOfType(errorx.IllegalArgument) {
-			w.WriteHeader(http.StatusBadRequest)
-		} else if errorx.IsOfType(errX, errorx.InternalError) {
-			w.WriteHeader(http.StatusInternalServerError)
-		}
-
-		if err := data.WriteJSONBytes(data.ResponseData{
-			Data:  "",
-			Error: errX.Message(),
-		}, w); err != nil {
-			logging.Log.Error("%s", errorx.Decorate(err, "failed to write JSON response: %v"))
-		}
+	if handler := h(w, r); handler != nil {
+		handler.ServeHTTP(w, r)
 	}
 }
 
@@ -50,6 +36,16 @@ func (s *Server) MountHandlers(h *handlers.Handlers) {
 	s.Router.Use(middleware.Heartbeat("/"))
 	s.Router.Use(middleware.RealIP)
 	s.Router.Use(httprate.LimitByIP(10, 1*time.Minute))
+	s.Router.Use(cors.Handler(cors.Options{
+		// AllowedOrigins:   []string{"https://foo.com"},
+		AllowedOrigins: []string{"https://*", "http://*"},
+		// AllowOriginFunc:  func(r *http.Request, origin string) bool { return true },
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
+		ExposedHeaders:   []string{"Link"},
+		AllowCredentials: false,
+		MaxAge:           300,
+	}))
 	s.Router.Use(middleware.Recoverer)
 
 	s.Router.Route("/api/v1", func(r chi.Router) {

@@ -1,11 +1,10 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
-	"github.com/joomcode/errorx"
-	"github.com/zcvaters/gmap-to-gpx/cmd/configure/logging"
 	"github.com/zcvaters/gmap-to-gpx/cmd/data"
 	"googlemaps.github.io/maps"
 	"io"
@@ -18,7 +17,12 @@ import (
 const GMapURL string = "https://www.gmap-pedometer.com"
 
 type GMapToGPXRequest struct {
-	RouteID int `json:"routeID"`
+	FileName string `json:"fileName"`
+	RouteID  int    `json:"routeID"`
+}
+
+type GMapToGPXResponse struct {
+	URL string `json:"url"`
 }
 
 type MapDataResp struct {
@@ -53,54 +57,54 @@ type ResultingGPX struct {
 	} `xml:"trk"`
 }
 
-func (h *Handlers) ConvertGMAPToGPX(w http.ResponseWriter, r *http.Request) error {
+type ResponseData struct {
+	Data  any    `json:"data"`
+	Error string `json:"error,omitempty"`
+}
+
+func (h *Handlers) ConvertGMAPToGPX(w http.ResponseWriter, r *http.Request) http.Handler {
 	w.Header().Set("Content-Type", "application/json")
 
 	var routeContext *GMapToGPXRequest
 	err := json.NewDecoder(r.Body).Decode(&routeContext)
-	if err == io.EOF {
-		return errorx.AssertionFailed.New("request contains no body contents")
-	} else if err != nil || routeContext == nil {
-		return errorx.AssertionFailed.New("request json malformed")
+	if err != nil {
+		return Error(fmt.Errorf("failed to decode request JSON: %q", err), http.StatusBadRequest)
 	}
 
-	if routeContext.RouteID == 0 {
-		return errorx.AssertionFailed.New("invalid route id. Cannot be: %d", routeContext.RouteID)
+	if routeContext == nil {
+		return Error(fmt.Errorf("invalid request payload"), http.StatusBadRequest)
 	}
-
 	gMapURL := GMapURL + "/gp/ajaxRoute/get"
 	if routeContext.RouteID < 5000000 {
-		// TODO: Determine why/if route id's this low still exist.
-		//gMapURL = GMapURL + "/getRoute.php"
-		return errorx.AssertionFailed.New("invalid route ID, must be greater than 5000000.")
+		return Error(fmt.Errorf("invalid route ID: %d, must be greater than 5000000", routeContext.RouteID), http.StatusBadRequest)
 	}
 
 	reqData := url.Values{"rId": {fmt.Sprint(routeContext.RouteID)}}.Encode()
 	gMapReq, err := http.NewRequest("POST", gMapURL, strings.NewReader(reqData))
 	if err != nil {
-		return errorx.InternalError.New("failed to create gmap api request: %s", err)
+		return Error(fmt.Errorf("failed to create gMap api request: %q", err), http.StatusInternalServerError)
 	}
 	gMapReq.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 
 	client := &http.Client{}
 	resp, err := client.Do(gMapReq)
 	if err != nil {
-		return errorx.Decorate(err, "failed gMap api request")
+		return Error(fmt.Errorf("failed gMap api request: %q", err), http.StatusInternalServerError)
 	}
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
 		if err != nil {
-			logging.Log.Errorf("failed to close response body, %v", err)
+			h.Log.Errorf("failed to close response body, %v", err)
 		}
 	}(resp.Body)
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return errorx.InternalError.New("failed to read the gMap response body: %s", err)
+		return Error(fmt.Errorf("failed to read the gMap response body: %q", err), http.StatusInternalServerError)
 	}
 	query, err := url.ParseQuery(string(respBody))
 	if err != nil {
-		return errorx.InternalError.New("failed to parse query parameters: %s", err)
+		return Error(fmt.Errorf("failed to parse query parameters: %q", err), http.StatusInternalServerError)
 	}
 
 	mapDataResp := MapDataResp{}
@@ -134,7 +138,7 @@ func (h *Handlers) ConvertGMAPToGPX(w http.ResponseWriter, r *http.Request) erro
 	}
 	polyStrings := strings.Split(mapDataResp.Polyline, "a")
 	if len(polyStrings) < 2 {
-		return errorx.InternalError.New("received poly strings less than two points.")
+		return Error(fmt.Errorf("no route data for %v", routeContext.RouteID), http.StatusBadRequest)
 	}
 	for stringIndex := 0; stringIndex < len(polyStrings); stringIndex = stringIndex + 2 {
 		latitude, _ := strconv.ParseFloat(polyStrings[stringIndex], 64)
@@ -143,11 +147,6 @@ func (h *Handlers) ConvertGMAPToGPX(w http.ResponseWriter, r *http.Request) erro
 			Latitude:  latitude,
 			Longitude: longitude,
 		})
-	}
-
-	gClient, err := maps.NewClient(maps.WithAPIKey(h.Env.ElevationAPIKey))
-	if err != nil {
-		return errorx.InternalError.New("failed to configure maps api client: %s", err)
 	}
 
 	eleReq := &maps.ElevationRequest{
@@ -161,9 +160,9 @@ func (h *Handlers) ConvertGMAPToGPX(w http.ResponseWriter, r *http.Request) erro
 		})
 	}
 
-	elevations, err := gClient.Elevation(r.Context(), eleReq)
+	elevations, err := h.Environment.GCP.MapsClient.Elevation(r.Context(), eleReq)
 	if err != nil {
-		return errorx.InternalError.New("failed to fetch elevation data: %s", err)
+		return Error(fmt.Errorf("failed to fetch elevation data: %q", err), http.StatusInternalServerError)
 	}
 
 	for i, elevationResp := range elevations {
@@ -174,16 +173,38 @@ func (h *Handlers) ConvertGMAPToGPX(w http.ResponseWriter, r *http.Request) erro
 
 	gpxRes, err := xml.Marshal(resultGPX)
 	if err != nil {
-		return errorx.InternalError.New("failed to marshal xml: %s", err)
+		return Error(fmt.Errorf("failed to marshal xml: %s", err), http.StatusInternalServerError)
+	}
+	key := data.CreateNewObjectKey(20)
+	uUrl, err := h.Environment.GCP.GetSignedUploadURL(key)
+	if err != nil {
+		return Error(fmt.Errorf("failed to create upload request: %q", err), http.StatusInternalServerError)
 	}
 
-	logging.Log.Debug(string(gpxRes))
-
-	if err := data.WriteJSONBytes(data.ResponseData{
-		Data:  "",
-		Error: "",
-	}, w); err != nil {
-		return errorx.InternalError.New("failed to write json response: %s", err)
+	uploadReq, err := http.NewRequest(http.MethodPut, *uUrl, bytes.NewReader(gpxRes))
+	if err != nil {
+		return Error(fmt.Errorf("failed to create put request"), http.StatusInternalServerError)
 	}
-	return nil
+	uploadReq.Header.Set("Content-Type", "binary/octet-stream")
+
+	uploadRes, err := client.Do(uploadReq)
+	if err != nil {
+		return Error(fmt.Errorf("failed to upload payload: %s", err), http.StatusInternalServerError)
+	}
+
+	if uploadRes.StatusCode != http.StatusOK {
+		errBody, _ := io.ReadAll(uploadRes.Body)
+		return Error(fmt.Errorf("failed to upload file: %q", errBody), http.StatusInternalServerError)
+	}
+
+	dUrl, err := h.Environment.GCP.GetSignedDownloadURL(key)
+	if err != nil {
+		return Error(fmt.Errorf("failed to get download url: %q", err), http.StatusInternalServerError)
+	}
+
+	if dUrl == nil {
+		return Error(fmt.Errorf("failed to download GPX file"), http.StatusInternalServerError)
+	}
+
+	return JSON(ResponseData{Data: GMapToGPXResponse{URL: *dUrl}})
 }

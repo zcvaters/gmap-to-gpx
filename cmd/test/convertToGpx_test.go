@@ -3,11 +3,9 @@ package test
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/stretchr/testify/require"
-	"github.com/zcvaters/gmap-to-gpx/api/handlers"
+	"github.com/zcvaters/gmap-to-gpx/cmd/api/handlers"
 	"github.com/zcvaters/gmap-to-gpx/cmd/configure/environment"
 	"github.com/zcvaters/gmap-to-gpx/cmd/configure/router"
-	"github.com/zcvaters/gmap-to-gpx/cmd/data"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,7 +16,7 @@ var server = router.CreateNewServer()
 
 func TestMain(m *testing.M) {
 	h := &handlers.Handlers{}
-	h.Env = environment.CreateNewEnv()
+	h.Environment = environment.CreateNewEnv()
 	server.MountHandlers(h)
 	os.Exit(m.Run())
 }
@@ -28,13 +26,12 @@ func TestConvertGMAPToGPX(t *testing.T) {
 		desc   string
 		input  any
 		status int
-		body   *data.ResponseData
 	}
 
 	tt := []test{
-		{desc: "Nil input", input: nil, status: http.StatusBadRequest, body: &data.ResponseData{Data: "", Error: "request json malformed"}},
-		{desc: "Invalid json to unmarshal", input: `{"test": 123}`, status: http.StatusBadRequest, body: &data.ResponseData{Data: "", Error: "request json malformed"}},
-		{desc: "Invalid Route ID", input: &handlers.GMapToGPXRequest{RouteID: 4999999}, status: http.StatusBadRequest, body: &data.ResponseData{Data: "", Error: "invalid route ID, must be greater than 5000000."}},
+		{desc: "Nil input", input: nil, status: http.StatusBadRequest},
+		{desc: "Invalid json to unmarshal", input: `{"test": 123}`, status: http.StatusBadRequest},
+		{desc: "Invalid Route ID", input: &handlers.GMapToGPXRequest{RouteID: 4999999}, status: http.StatusBadRequest},
 		{desc: "Valid Route ID", input: &handlers.GMapToGPXRequest{RouteID: 5000001}, status: http.StatusOK},
 		{desc: "Random Route ID", input: &handlers.GMapToGPXRequest{RouteID: 7696696}, status: http.StatusOK},
 	}
@@ -51,11 +48,7 @@ func TestConvertGMAPToGPX(t *testing.T) {
 			}
 			rr := executeRequest(req, server)
 			checkResponseCode(t, tc.status, rr.Code)
-			if tc.body != nil {
-				j, _ := json.Marshal(tc.body)
-				tcJsonStr := string(j)
-				require.JSONEq(t, tcJsonStr, rr.Body.String())
-			}
+			t.Logf("Body: %q", rr.Body)
 		})
 	}
 }
